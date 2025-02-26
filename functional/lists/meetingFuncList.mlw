@@ -1,0 +1,323 @@
+module MeetingAbs
+
+
+  use int.Int
+  use list.List
+  use set.Fset
+
+
+  type user
+  type meeting
+
+  type stateT = abstract { host : fset (meeting,user);
+                           participants : fset (meeting, user);
+                           active : fset meeting
+                         }
+                         
+  invariant{forall u1 u2:user, m:meeting. (mem (m,u1) host /\ mem (m,u2) host) -> u1=u2}      
+
+  invariant{forall u:user,m:meeting. (mem m active /\ mem (m,u) host) -> mem (m,u) participants}
+           
+  by { host = Fset.empty ; participants = Fset.empty; active = Fset.empty }
+
+            
+          
+  val function schedule (m: meeting) (h:user) (state:stateT) : stateT
+    requires{forall u:user. not mem (m,u) state.host}
+    requires{not mem m state.active}
+    ensures{result.host = add (m,h) state.host}
+    ensures{result.active = state.active}
+    ensures{result.participants = state.participants}
+    
+  val function start (m : meeting) (state:stateT) : stateT  
+    requires{not mem m state.active}
+    requires{exists u:user. mem (m,u) state.host} 
+    requires{forall u:user. not mem (m,u) state.participants}
+    ensures{result.host= state.host}
+    ensures{result.active = Fset.add m state.active}
+    ensures{forall u:user. (Fset.mem (m,u) state.host) <-> result.participants =  Fset.add (m,u) state.participants} 
+
+
+  val function join (m:meeting) (u:user) (state:stateT) : stateT
+    requires{mem m state.active}
+    requires{not mem (m,u) state.participants}
+    ensures{result.participants = Fset.add (m,u) state.participants}
+    ensures{result.host = state.host}
+    ensures{result.active = state.active}
+
+   
+  val function leave (m:meeting) (u:user) (state:stateT) : stateT
+    requires{not mem (m,u) state.host}
+    requires{mem m state.active}
+    requires{mem (m,u) state.participants} 
+    ensures{result.participants = Fset.remove (m,u) state.participants}
+    ensures{result.host = state.host}
+    ensures{result.active = state.active}
+
+  val function end_ (m : meeting) (state:stateT) : stateT
+    requires{mem m state.active}
+    ensures{result.host = state.host}
+    ensures{result.active = remove m state.active}
+    ensures{forall u:user, m2:meeting. m<>m2 -> (Fset.mem (m2,u) state.participants <-> Fset.mem (m2,u) result.participants)}
+    ensures{forall u:user. not Fset.mem (m,u) result.participants}
+    
+
+
+end
+
+
+
+
+
+
+
+module MeetingFuncList
+
+
+  use int.Int
+  use list.List
+  use list.Mem
+  use list.NumOcc
+  use set.Fset
+  use list.Elements
+
+
+
+
+  type user
+  type meeting
+
+  val eq_user (x y :user) : bool
+    ensures { result <-> x=y }
+    
+  val eq_meeting (x y :meeting) : bool
+    ensures { result <-> x=y }
+
+  type stateT = { ghost host : fset (meeting,user);
+                  host_ : list (meeting,user);
+                  ghost participants : fset (meeting, user);
+                  participants_ : list (meeting, user);
+                  ghost active : fset meeting;
+                  active_ : list meeting
+                }
+   
+  (* inv abs *)         
+  invariant{forall u1 u2:user, m:meeting. (Fset.mem (m,u1) host /\ Fset.mem (m,u2) host) -> u1=u2}      
+  invariant{forall u:user,m:meeting. (Fset.mem m active /\ Fset.mem (m,u) host) -> Fset.mem (m,u) participants}
+           
+  (* inv relacional *)
+  invariant{forall u:user, m:meeting. Fset.mem (m,u) host <-> Mem.mem (m,u) host_}
+  invariant{forall u:user, m:meeting. Fset.mem (m,u) participants <-> Mem.mem (m,u) participants_}
+  invariant{forall m:meeting. Fset.mem m active <-> Mem.mem m active_}
+
+  (* inv implementacional *)
+  invariant{forall u:user, m:meeting. num_occ (m,u) host_ <=1}
+  invariant{forall u:user, m:meeting. num_occ (m,u) participants_ <=1}
+  invariant{forall m:meeting. num_occ m active_ <=1}
+           
+  by { host = Fset.empty ; participants = Fset.empty; active = Fset.empty;
+       host_=Nil; participants_=Nil; active_=Nil }
+
+
+
+  let mkMeeting () : stateT
+  = { host_ = Nil ;
+      active_ = Nil ; 
+      participants_ = Nil;
+      host = Fset.empty;
+      active = Fset.empty;
+      participants = Fset.empty
+    }
+    
+    
+  let function schedule (m:meeting) (h:user) (state:stateT) : stateT
+    requires{forall u:user. not Fset.mem (m,u) state.host}
+    requires{not Fset.mem m state.active}
+    ensures{result.host = add (m,h) state.host}
+    ensures{result.active = state.active}
+    ensures{result.participants = state.participants}
+  = {
+    host = Fset.add (m,h) state.host;
+    host_ = Cons (m,h) state.host_;
+    active = state.active;
+    active_ = state.active_;
+    participants = state.participants;
+    participants_ = state.participants_
+    }  
+   
+   
+  let rec function getHost_(m : meeting) (l:list (meeting,user)) : user
+    requires{exists u:user. Mem.mem (m,u) l}
+    ensures{Mem.mem (m,result) l}
+    variant{l}
+    =
+    match l with
+    | Nil -> absurd
+    | Cons (m2,u) t -> if eq_meeting m2 m then u else getHost_ m t
+  end
+
+
+   
+  let function start (m : meeting) (state:stateT) : stateT
+    requires{not Fset.mem m state.active}
+    requires{exists u:user. Fset.mem (m,u) state.host}
+    requires{forall u:user. not Fset.mem (m,u) state.participants}
+    ensures{result.host= state.host}
+    ensures{result.active = Fset.add m state.active}
+    ensures{forall u:user. (Fset.mem (m,u) state.host) <-> result.participants =  Fset.add (m,u) state.participants} 
+  = 
+    {
+    participants = Fset.add (m, getHost_ m state.host_) state.participants;
+    participants_ = Cons (m, getHost_ m state.host_) state.participants_;  
+    host = state.host;
+    host_ = state.host_;
+    active = Fset.add m state.active;
+    active_ = Cons m state.active_
+    } 
+    
+    
+
+
+  let function join (m:meeting) (u:user) (state:stateT) : stateT
+    requires{Fset.mem m state.active}
+    requires{not Fset.mem (m,u) state.participants}
+    ensures{result.participants = Fset.add (m,u) state.participants}
+    ensures{result.host = state.host}
+    ensures{result.active = state.active}
+
+  = {
+    participants = Fset.add (m, u) state.participants;
+    participants_ = Cons (m, u) state.participants_;  
+    host = state.host;
+    host_ = state.host_;
+    active = state.active;
+    active_ = state.active_
+    }  
+    
+
+
+    
+  let rec function leaveMeet_(m : meeting) (u:user) (l:list (meeting,user)) : list (meeting,user)
+    requires{Mem.mem (m,u) l}
+    requires{num_occ (m,u) l =1} 
+    ensures{not Mem.mem (m,u) result}
+    ensures{forall u2:user, m2:meeting. (m2<>m \/ u2<>u) -> (num_occ (m2,u2) l = num_occ (m2,u2) result)}
+    variant{l}
+    =
+    match l with
+    | Nil -> Nil
+    | Cons (m2,u2) t -> if eq_meeting m2 m && eq_user u2 u then t else Cons (m2,u2) (leaveMeet_ m u t)
+    end
+      
+    
+  let function leave (m:meeting) (u:user) (state:stateT) : stateT
+    requires{not Fset.mem (m,u) state.host}
+    requires{Fset.mem m state.active}
+    requires{Fset.mem (m,u) state.participants} 
+    ensures{result.participants = Fset.remove (m,u) state.participants}
+    ensures{result.host = state.host}
+    ensures{result.active = state.active}
+  = {
+    participants = Fset.remove (m, u) state.participants;
+    participants_ = leaveMeet_ m u state.participants_;  
+    host = state.host;
+    host_ = state.host_;
+    active = state.active;
+    active_ = state.active_
+    }
+
+
+   
+    
+  let rec function remove_meeting_participants (m : meeting) (l:list (meeting,user)) : list (meeting,user)
+    ensures{forall u:user, m2:meeting. m<>m2 -> (num_occ (m2,u) result = num_occ (m2,u) l)}
+    ensures{forall u:user. not Mem.mem (m,u) result}
+    ensures{forall u:user, m2:meeting. m<>m2 -> (Mem.mem (m2,u) l <-> Mem.mem (m2,u) result)}
+    ensures{forall u:user. not Mem.mem (m,u) result}
+    variant{l}
+    =
+    match l with
+    | Nil -> Nil
+    | Cons (m2,u2) t -> if eq_meeting m2 m then remove_meeting_participants m t else Cons (m2,u2) (remove_meeting_participants m t)
+    end
+
+
+
+  let rec function deactivate_meeting_ (m:meeting) (l:list meeting) : list meeting
+    requires{num_occ m l = 1}
+    ensures{forall m2:meeting. (m2<>m) -> (num_occ m2 l = num_occ m2 result)}
+    ensures{not Mem.mem m result}
+    =
+    match l with
+    | Nil -> Nil
+    | Cons m2 t -> if eq_meeting m2 m then t else Cons m2 (deactivate_meeting_ m t)
+    end
+
+
+
+    
+  let function end_ (m:meeting) (state:stateT) : stateT
+    requires{mem m state.active}
+    ensures{result.host = state.host}
+    ensures{result.active = remove m state.active}
+    ensures{forall u:user, m2:meeting. m<>m2 -> (Fset.mem (m2,u) state.participants <-> Fset.mem (m2,u) result.participants)}
+    ensures{forall u:user. not Fset.mem (m,u) result.participants}
+    
+  = {
+    active = remove m state.active;
+    active_ = deactivate_meeting_ m state.active_;
+    participants = elements (remove_meeting_participants m state.participants_);
+    participants_ = remove_meeting_participants  m state.participants_;  
+    host = state.host;
+    host_ = state.host_
+    }
+     
+
+
+
+  clone MeetingAbs with 
+    type user, type meeting, type stateT,
+    val schedule, val start, val join, val leave, val end_
+
+end
+
+
+
+
+module MeetingFuncListEx
+  
+  use int.Int
+  clone MeetingFuncList 
+    with type user = int, type meeting = int, 
+    val eq_user = (=), val eq_meeting = (=)
+    
+ 
+    
+  let main()=
+    let meet = mkMeeting() in
+    let meet = schedule 1 1 meet in
+    let meet = schedule 2 1 meet in
+    let meet = start 1 meet in
+    let meet = start 2 meet in
+    let meet = schedule 3 2 meet in
+    let meet = start 3 meet in
+    let meet = join 3 1 meet in
+    let meet = join 2 3 meet in
+    let meet = join 3 3 meet in
+    let meet = join 3 4 meet in
+    let meet = end_ 1 meet in
+    let meet = leave 3 1 meet in
+    let meet = schedule 4 5 meet in
+    meet
+
+
+  
+    
+end
+    
+    
+
+  
+
+
+  

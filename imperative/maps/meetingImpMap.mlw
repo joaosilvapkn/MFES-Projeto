@@ -1,0 +1,289 @@
+module MeetingAbs
+
+
+  use int.Int
+  use list.List
+  use set.Fset
+
+
+  type user
+  type meeting
+
+  type stateT = abstract { mutable host : fset (meeting,user);
+                           mutable participants : fset (meeting, user);
+                           mutable active : fset meeting
+                         }
+                         
+  invariant{forall u1 u2:user, m:meeting. (mem (m,u1) host /\ mem (m,u2) host) -> u1=u2}      
+
+  invariant{forall u:user,m:meeting. (mem m active /\ mem (m,u) host) -> mem (m,u) participants}
+           
+  by { host = Fset.empty ; participants = Fset.empty; active = Fset.empty }
+            
+           
+
+  val schedule (m: meeting) (h:user) (state:stateT) : ()
+    writes{state.host}
+    requires{forall u:user. not mem (m,u) state.host}
+    requires{not mem m state.active}
+    ensures{state.host = add (m,h) (old state.host)}
+    ensures{state.active = old state.active}
+    ensures{state.participants = old state.participants}
+
+    
+  val start (m : meeting) (state:stateT) : () 
+    writes{state.active, state.participants}
+    requires{not mem m state.active}
+    requires{exists u:user. mem (m,u) state.host} 
+    requires{forall u:user. not mem (m,u) state.participants}
+    ensures{state.host= old state.host}
+    ensures{state.active = Fset.add m (old state.active)}
+    ensures{forall u:user. (Fset.mem (m,u) (old state.host)) <-> state.participants =  Fset.add (m,u) (old state.participants)} 
+
+
+  val join (m:meeting) (u:user) (state:stateT) : ()
+    writes{state.participants}
+    requires{mem m state.active}
+    requires{not mem (m,u) state.participants}
+    ensures{state.participants = Fset.add (m,u) (old state.participants)}
+    ensures{state.host = old state.host}
+    ensures{state.active = old state.active}
+
+
+   
+  val leave (m:meeting) (u:user) (state:stateT) : ()
+    writes{state.participants}
+    requires{not mem (m,u) state.host}
+    requires{mem m state.active}
+    requires{mem (m,u) state.participants} 
+    requires{exists u2:user. Fset.mem (m,u2) state.host /\ Fset.mem (m,u2) state.participants /\ u<>u2}
+    ensures{state.participants = Fset.remove (m,u) (old state.participants)}
+    ensures{state.host = old state.host}
+    ensures{state.active = old state.active}
+
+
+  val end_ (m : meeting) (state:stateT) : ()
+    writes{state.active, state.participants}
+    requires{mem m state.active}
+    ensures{state.host = old state.host}
+    ensures{state.active = remove m (old state.active)}
+    ensures{forall u:user, m2:meeting. m<>m2 -> (Fset.mem (m2,u) (old state.participants) <-> Fset.mem (m2,u) state.participants)}
+    ensures{forall u:user. not Fset.mem (m,u) state.participants}
+    
+
+end
+
+
+
+module MeetingImpMap
+
+
+
+  use int.Int
+  use list.List
+  use list.Mem
+  use list.NumOcc
+  use set.Fset
+  use list.Elements
+  use list.Append
+
+
+  type user
+  type meeting
+
+  val eq_user (x y :user) : bool
+    ensures { result <-> x=y }
+    
+  val eq_meeting (x y :meeting) : bool
+    ensures { result <-> x=y }
+
+
+  clone fmap.MapApp with type key = meeting
+
+  type stateT = { mutable ghost host : fset (meeting,user);
+                  mutable host_ : MapApp.t user;
+                  mutable ghost participants : fset (meeting, user);
+                  mutable participants_ : MapApp.t (list user);
+                  mutable ghost active : fset meeting;
+                  mutable active_ : list meeting
+                }
+ 
+
+
+  (* inv abs *)         
+  invariant{forall u1 u2:user, m:meeting. (Fset.mem (m,u1) host /\ Fset.mem (m,u2) host) -> u1=u2}      
+  invariant{forall u:user,m:meeting. (Fset.mem m active /\ Fset.mem (m,u) host) -> Fset.mem (m,u) participants}
+           
+  (* inv relacional *)
+  invariant{forall u:user, m:meeting. Fset.mem (m,u) host <-> (mem m host_ /\ u = find m host_) }
+  invariant{forall u:user, m:meeting. Fset.mem (m,u) participants <-> (mem m participants_ /\ Mem.mem u (find m participants_))}
+  invariant{forall m:meeting. Fset.mem m active <-> Mem.mem m active_} 
+  
+  invariant{forall m:meeting. (exists u:user. Fset.mem (m,u) host) <-> (mem m host_)}
+  invariant{forall m:meeting. (exists u:user. Fset.mem (m,u) participants) <-> (mem m participants_)}
+
+  (* inv implementacional *)
+  invariant{forall m:meeting, u:user. mem m participants_ -> num_occ u (find m participants_)<=1}
+  invariant{forall m:meeting. num_occ m active_ <=1}
+  invariant{forall m:meeting. Mem.mem m active_ <-> mem m participants_} (* reuniao está ativa sse tem participantes *)
+  
+  
+  
+  by { host = Fset.empty ; participants = Fset.empty; active = Fset.empty;
+       host_=create(); participants_=create(); active_=Nil }       
+
+
+
+
+
+
+
+
+  let mkMeetingMap () : stateT
+  = { host_ = create() ;
+      active_ = Nil ; 
+      participants_ = create();
+      host = Fset.empty;
+      active = Fset.empty;
+      participants = Fset.empty
+    }
+
+  
+  
+  
+  let schedule (m:meeting) (h:user) (state:stateT) : ()
+    writes{state.host, state.host_}
+    requires{forall u:user. not Fset.mem (m,u) state.host}
+    requires{not Fset.mem m state.active}
+    ensures{state.host = Fset.add (m,h) (old state.host)}
+    ensures{state.active = old state.active}
+    ensures{state.participants = old state.participants}
+    = 
+    state.host <- Fset.add (m,h) state.host;
+    state.host_ <- add m h state.host_ 
+
+
+
+
+  let start (m : meeting) (state:stateT) : () 
+    writes{state.participants, state.participants_, state.active, state.active_}
+    requires{not Fset.mem m state.active}
+    requires{exists u:user. Fset.mem (m,u) state.host}
+    requires{forall u:user. not Fset.mem (m,u) state.participants}
+    ensures{state.host= old state.host}
+    ensures{state.active = Fset.add m (old state.active)}
+    ensures{forall u:user. (Fset.mem (m,u) (old state.host)) <-> state.participants =  Fset.add (m,u) (old state.participants)} 
+  = 
+    state.participants <- Fset.add (m, find m state.host_) state.participants;
+    state.participants_ <- add m (Cons (find m state.host_) Nil) state.participants_;  
+    state.active <- Fset.add m state.active;
+    state.active_ <- Cons m state.active_
+    
+
+
+  let join (m:meeting) (u:user) (state:stateT) : ()
+    writes{state.participants, state.participants_}
+    requires{Fset.mem m state.active}
+    requires{not Fset.mem (m,u) state.participants}
+    ensures{state.participants = Fset.add (m,u) (old state.participants)}
+    ensures{state.host = old state.host}
+    ensures{state.active = old state.active}
+  = 
+    state.participants <- Fset.add (m, u) state.participants;
+    state.participants_ <- add m (Cons u (find m state.participants_)) state.participants_ 
+
+
+
+  let rec function leaveMeeting (u:user) (l:list user) : list user
+    requires{num_occ u l =1} 
+    ensures{not Mem.mem u result}
+    ensures{forall u2:user. u2<>u -> (num_occ u2 l = num_occ u2 result)}
+    variant{l}
+    =
+    match l with
+    | Nil -> Nil
+    | Cons u2 t -> if eq_user u2 u then t else Cons u2 (leaveMeeting u t)
+    end
+      
+    
+  let leave (m:meeting) (u:user) (state:stateT) : ()
+    writes{state.participants, state.participants_}
+    requires{not Fset.mem (m,u) state.host}
+    requires{Fset.mem m state.active}
+    requires{Fset.mem (m,u) state.participants} 
+    requires{exists u2:user. Fset.mem (m,u2) state.host /\ Fset.mem (m,u2) state.participants /\ u<>u2}
+    ensures{state.participants = Fset.remove (m,u) (old state.participants)}
+    ensures{state.host = old state.host}
+    ensures{state.active = old state.active}
+  = 
+    state.participants <- Fset.remove (m, u) state.participants;
+    state.participants_ <- add m (leaveMeeting u (find m state.participants_)) state.participants_
+    
+   
+  let rec function deactivate_meeting (m:meeting) (l:list meeting) : list meeting
+    requires{num_occ m l = 1}
+    ensures{forall m2:meeting. (m2<>m) -> (num_occ m2 l = num_occ m2 result)}
+    ensures{not Mem.mem m result}
+    =
+    match l with
+    | Nil -> Nil
+    | Cons m2 t -> if eq_meeting m2 m then t else Cons m2 (deactivate_meeting m t)
+    end
+
+  (* dado uma reuniao e uma lista de tuplos reuniao*user, remove os tuplos com a reunião passada como argumento *)
+  let rec function remove_pairs (m:meeting) (l:list (meeting,user)) : list (meeting,user)
+    ensures{forall m2:meeting, u:user. m2<>m -> (Mem.mem (m2,u) l <-> Mem.mem (m2,u) result)}
+    ensures{forall u:user. not Mem.mem (m,u) result}
+    =
+    match l with
+    | Nil -> Nil
+    | Cons (m2,u) t -> if eq_meeting m m2 then remove_pairs m t else Cons (m2,u) (remove_pairs m t)
+    end
+
+  (* transforma uma reunião e uma lista de users, numa lista de tuplos meeting*user *)
+  let rec function create_pairs (m:meeting) (l:list user) : list (meeting,user)
+    ensures{forall m2:meeting, u:user. Mem.mem (m2,u) result <-> (m2=m /\ Mem.mem u l)}
+    =
+    match l with
+    | Nil -> Nil
+    | Cons u t -> Cons (m,u) (create_pairs m t) 
+    end
+
+  (* transforma o mapa numa lista de pares *)
+  let rec function map_to_list (l:list meeting) (mapa:MapApp.t (list user)) : list (meeting,user)
+   requires{forall m:meeting. Mem.mem m l -> mem m mapa}
+   ensures{forall m:meeting, u:user. (Mem.mem m l /\ Mem.mem u (find m mapa)) <-> ( Mem.mem (m,u) result)}
+   =
+   match l with
+   | Nil -> Nil
+   | Cons m t -> (create_pairs m (find m mapa)) ++ (map_to_list t mapa)
+   end  
+
+  
+ 
+  let end_ (m:meeting) (state:stateT) : ()
+    writes{state.active, state.active_, state.participants, state.participants_}
+    requires{Fset.mem m state.active}
+    ensures{state.host = old state.host}
+    ensures{state.active = Fset.remove m (old state.active)}
+    ensures{forall u:user, m2:meeting. m2<>m -> (Fset.mem (m2,u) state.participants <-> Fset.mem (m2,u) (old state.participants))}
+    ensures{forall u:user. not Fset.mem (m,u) state.participants}
+  =
+    state.active <- Fset.remove m state.active;
+    state.active_ <- deactivate_meeting m state.active_;
+    state.participants <- elements( remove_pairs m (map_to_list state.active_ state.participants_) ); (* transforma o mapa numa lista de tuplos, remove os pares com a reunião m, e transforma a lista de tuplos num set*)
+    state.participants_ <- remove m state.participants_
+
+
+
+
+
+
+  clone MeetingAbs with
+    type user, type meeting, type stateT,
+    val schedule, val start, val join, val leave, val end_
+
+
+end
+
+
