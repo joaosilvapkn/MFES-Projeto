@@ -1,6 +1,6 @@
 Projeto de Defesa de Nota
 
-Conversão de software concept (no ficheiro meeting.als) usando refinamento why3 com versões imperativas e funcionais
+Conversão de software concept (no ficheiro "meeting.als") usando refinamento why3 com versões imperativas e funcionais
 
 Cada versão contêm uma implementação com listas e maps
 
